@@ -1,6 +1,6 @@
 # Weight-based Decomposition: A Case for Bilinear MLPs
 
-This is the official code repository for the paper [link].
+This is the official code repository for the above paper [[link](https://arxiv.org/abs/2406.03947)].
 
 ## Abstract
 
