@@ -12,3 +12,7 @@ Code is organized into two folders:
 
 - **MNIST**: The training setup and analysis of small MNIST and FMNIST models.
 - **Language**: The transformer model used for the TinyStories analysis.
+
+## Research
+
+This is a snapshot of our work for the paper. Please refer to [this repo](https://github.com/tdooms/bilinear-interp) for an up-to-date version of our research. Note that the code there will be messy!
