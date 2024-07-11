@@ -16,10 +16,10 @@ model = Transformer.from_config(
 
 model.summary()
 # %%
-model.fit(log=True, epochs=5, wd=1, batch_size=128)
+model.fit(log=True, epochs=5, wd=0.5, batch_size=128)
 # %%
 model.generate("Once upon a time, ", max_length=100)
 # %%
-model.push_to_hub(f"TinyStories-1-1024-inl")
+model.push_to_hub(f"TinyStories-1-1024-i")
 # %%
 

@@ -10,7 +10,7 @@ Gated Linear Units (GLUs) have become a common building block in modern foundati
 
 Code is organized into two folders:
 
-- **MNIST**: The training setup and analysis of small MNIST and FMNIST models.
+- **MNIST**: The training setup and analysis of small MNIST and FMNIST models. Refer to [here](mnist/simple/example.ipynb) for a simple demo.
 - **Language**: The transformer model used for the TinyStories analysis.
 
 ## Research
