@@ -1,18 +1,25 @@
-# Weight-based Decomposition: A Case for Bilinear MLPs
+# Bilinear MLPs enable weight-based mechanistic interpretability
 
 This is the official code repository for the above paper [[link](https://arxiv.org/abs/2406.03947)].
 
 ## Abstract
 
-Gated Linear Units (GLUs) have become a common building block in modern foundation models. Bilinear layers drop the non-linearity in the ``gate'' but still have comparable performance to other GLUs. An attractive quality of bilinear layers is that they can be fully expressed in terms of a third-order tensor and linear operations. Leveraging this, we develop a method to decompose the bilinear tensor into a set of sparsely interacting eigenvectors that show promising interpretability properties in preliminary experiments for shallow image classifiers (MNIST) and small language models (Tiny Stories). Since the decomposition is fully equivalent to the model's original computations, bilinear layers may be an interpretability-friendly architecture that helps connect features to the model weights. Application of our method may not be limited to pre-trained bilinear models since we find that language models such as TinyLlama-1.1B can be finetuned into bilinear variants.
+A mechanistic understanding of how MLPs do computation in deep neural networks 
+remains elusive. Current interpretability work can extract features from
+hidden activations over an input dataset but generally cannot explain how MLP
+weights construct features. One challenge is that element-wise nonlinearities
+introduce higher-order interactions and make it difficult to trace computations
+through the MLP layer. In this paper, we analyze bilinear MLPs, a type of
+Gated Linear Unit (GLU) without any element-wise nonlinearity that nevertheless 
+achieves competitive performance. Bilinear MLPs can be fully expressed in
+terms of linear operations using a third-order tensor, allowing flexible analysis of
+the weights. Analyzing the spectra of bilinear MLP weights using eigendecomposition 
+reveals interpretable low-rank structure across toy tasks, image classification, and language modeling. 
+We use this understanding to craft adversarial
+examples, uncover overfitting, and identify small language model circuits directly
+from the weights alone. Our results demonstrate that bilinear layers serve as an
+interpretable drop-in replacement for current activation functions and that weight-based 
+interpretability is viable for understanding deep-learning models.
 
-## Code
-
-Code is organized into two folders:
-
-- **MNIST**: The training setup and analysis of small MNIST and FMNIST models. Refer to [here](mnist/simple/example.ipynb) for a simple demo.
-- **Language**: The transformer model used for the TinyStories analysis.
-
-## Research
-
-This is a snapshot of our work for the paper. Please refer to [this repo](https://github.com/tdooms/bilinear-interp) for an up-to-date version of our research. Note that the code there will be messy!
+## Progress
+The current code is incomplete and will be updated and documented soon.
