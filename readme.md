@@ -1,5 +1,4 @@
 # Bilinear MLPs enable weight-based mechanistic interpretability
-# Bilinear MLPs enable weight-based mechanistic interpretability
 
 This is the official code repository for the above paper [[link](https://arxiv.org/pdf/2410.08417)].
 
