@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 import pandas as pd
 from torch import nn
@@ -9,31 +7,27 @@ from transformers.modeling_outputs import CausalLMOutput
 from transformers import PretrainedConfig, PreTrainedModel, AutoTokenizer, DataCollatorForLanguageModeling
 from torch import Tensor
 from jaxtyping import Float
-from datasets import load_dataset
 import wandb
 from transformers import TrainingArguments, Trainer
-
-from language.utils import UBE, Vocab
-from shared import MLP, Norm
+from shared.components import MLP, Norm
 
 
 class Config(PretrainedConfig):
     def __init__(
         self,
-        n_vocab: int = 4096,
         n_head: int = 4,
         n_layer: int= 4,
         n_ctx: int = 256,
         d_model: int = 4 * 64,
         d_hidden: int = 4 * 4 * 64,
         bilinear: bool = True,
-        gate: bool = False,
+        gate: str | None = None,
+        bias: bool = False,
         normalization: bool = True,
-        modifier: str | None = None,
-        noise: float | None = None,
+        tokenizer: str = None,
+        repo: str = None,
         **kwargs
     ):
-        self.n_vocab = n_vocab
         self.n_head = n_head
         self.n_layer = n_layer
         self.n_ctx = n_ctx
@@ -42,10 +36,11 @@ class Config(PretrainedConfig):
         
         self.bilinear = bilinear
         self.gate = gate
+        self.bias = bias
         self.normalization = normalization
-        self.noise = noise
         
-        self.modifier = modifier
+        self.tokenizer = tokenizer
+        self.repo = repo
         
         super().__init__(**kwargs)
     
@@ -66,7 +61,7 @@ def apply_rotary_pos_emb(q, k, cos, sin):
 
 
 class Rotary(torch.nn.Module):
-    def __init__(self, dim: int, base: int = 10000):
+    def __init__(self, dim: int, n_ctx: int, base: int = 10000):
         super().__init__()
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer("inv_freq", inv_freq)
@@ -74,7 +69,7 @@ class Rotary(torch.nn.Module):
         self.cos_cached = None
         self.sin_cached = None
 
-    def forward(self, q, k, device):
+    def forward(self, q, k, device="cuda"):
         seq_len = q.size(-2)
         
         # Using isinstance does not work, this is necessary for NNSight compatibility
@@ -89,29 +84,29 @@ class Rotary(torch.nn.Module):
             self.sin_cached = emb.sin()[None, None, :, :]
         
         return apply_rotary_pos_emb(q, k, self.cos_cached, self.sin_cached)
-    
+
 
 class Attention(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
         self.config = config
         
-        self.rotary = Rotary(config.d_model // config.n_head)
+        self.rotary = Rotary(config.d_model // config.n_head, config.n_ctx)
         self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=False)
         self.o = nn.Linear(config.d_model, config.d_model, bias=False)
         
         self.softmax = nn.Softmax(dim=-1)
         self.mask = torch.tril(torch.ones(config.n_ctx, config.n_ctx))[None, None, :, :]
     
-    def forward(self, x: Float[Tensor, "batch seq d_model"]) -> Float[Tensor, "batch seq d_model"]:
+    def forward(self, x: Float[Tensor, "batch seq d_model"], attn_mask=None) -> Float[Tensor, "batch seq d_model"]:
         n_head = self.config.n_head
         
         qkv = self.qkv(x)
         q, k, v = rearrange(qkv, 'batch seq (n n_head d_head) -> n batch n_head seq d_head', n=3, n_head=n_head).unbind(dim=0)
-        q, k = self.rotary(q, k, q.device)
+        q, k = self.rotary(q, k)
         
         if self.training:
-            z = scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=0.0, is_causal=True)
+            z = scaled_dot_product_attention(q, k, v, attn_mask=attn_mask[:, None, None, :], dropout_p=0.0, is_causal=True)
         else:
             scores = einsum(q, k, "batch n_head seq_q d_head, batch n_head seq_k d_head -> batch n_head seq_q seq_k")
             scores = scores / (torch.tensor(q.size(-1), device=x.device).sqrt())
@@ -127,51 +122,40 @@ class Attention(nn.Module):
 class Layer(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
+        self.scale = 1.0 / ((2.0 * config.n_layer) ** 0.5)
         
         self.attn = Attention(config)
-        self.mlp = MLP(config.d_model, config.d_hidden, bilinear=config.bilinear, gate=config.gate)
+        self.mlp = MLP(config.d_model, config.d_hidden, bilinear=config.bilinear, gate=config.gate, bias=config.bias)
         
-        self.n1 = Norm(config.d_model, config.normalization, config.noise)
-        self.n2 = Norm(config.d_model, config.normalization, config.noise)
+        self.n1 = Norm(config.normalization)
+        self.n2 = Norm(config.normalization)
     
-    def forward(self, x):
-        x = x + self.attn(self.n1(x))
+    def forward(self, x, attn_mask=None):
+        x = x + self.scale * self.attn(self.n1(x), attn_mask)
         x = x + self.mlp(self.n2(x))
         return x
         
 
 class Transformer(PreTrainedModel):
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, tokenizer: AutoTokenizer):
         super().__init__(config)
         self.config = config
-        
-        self.url = "tdooms/TinyStories"
-        self.tokenizer = AutoTokenizer.from_pretrained(f"{self.url}-{config.n_vocab}", pad_token="[EOS]")
+        self.tokenizer = tokenizer
         
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.n_vocab, config.d_model),
+            wte = nn.Embedding(tokenizer.vocab_size, config.d_model),
             h = nn.ModuleList([Layer(config) for _ in range(config.n_layer)]),
-            n_f = Norm(config.d_model, config.normalization, config.noise)
+            n_f = Norm(config.normalization)
         ))
         
-        self.lm_head = nn.Linear(config.d_model, config.n_vocab, bias=False)
+        self.lm_head = nn.Linear(config.d_model, tokenizer.vocab_size, bias=False)
         self.criterion = nn.CrossEntropyLoss()
         
-        self.apply(self._init_weights)
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-        
-    def forward(self, input_ids=None, labels=None, **kwargs):
+    def forward(self, input_ids=None, labels=None, attention_mask=None, **kwargs):
         x = self.transformer.wte(input_ids)
         
         for layer in self.transformer.h:
-            x = layer(x)
+            x = layer(x, attention_mask.bool() if attention_mask is not None else None)
     
         x = self.transformer.n_f(x)
         logits = self.lm_head(x)
@@ -185,56 +169,35 @@ class Transformer(PreTrainedModel):
             loss = self.criterion(shifted_logits.view(-1, logits.size(-1)), shifted_labels.view(-1))
             return CausalLMOutput(loss=loss, logits=logits)
     
-    def center_unembed(self):
-        """Centers the unembedding layer of the model along the input dim.
-
-        Returns:
-            self: The model, also updated in place.
-        """
-        self.lm_head.weight = nn.Parameter(self.lm_head.weight - self.lm_head.weight.mean(dim=1, keepdim=True))
-        return self
-    
-    def fold_norms(self):
-        for layer in self.transformer.h:
-            layer.attn.qkv.weight.data = layer.attn.qkv.weight.data * layer.n1.weight.data[None, :]
-            layer.mlp.w.weight.data = layer.mlp.w.weight.data * layer.n2.weight.data[None, :]
-            
-            layer.n1.weight.data = torch.ones_like(layer.n1.weight.data)
-            layer.n2.weight.data = torch.ones_like(layer.n2.weight.data)
+    @staticmethod
+    def get_tokenizer(name):
+        name, pad = {
+            "ts-4096": ("tdooms/ts-tokenizer-4096", "[EOS]"),
+            "mistral": ("mistral-community/Mixtral-8x22B-v0.1", "</s>"),
+            "gpt2": ("openai-community/gpt2", "<|endoftext|>")
+        }[name]
         
-        self.lm_head.weight.data = self.lm_head.weight.data * self.transformer.n_f.weight.data
-        self.transformer.n_f.weight.data = torch.ones_like(self.transformer.n_f.weight.data)
-        
-        return self
+        return AutoTokenizer.from_pretrained(name, pad_token=pad, padding_side="right")
+        # return AutoTokenizer.from_pretrained(name, pad_token=pad)
     
     @classmethod
-    def from_config(csl, *args, **kwargs):
+    def from_pretrained(cls, repo, device='cuda', **kwargs):
+        config = Config.from_pretrained(repo, repo=repo)
+        tokenizer = cls.get_tokenizer(config.tokenizer)
+        
+        return super(Transformer, Transformer).from_pretrained(repo, config=config, tokenizer=tokenizer, device_map=device, **kwargs)
+    
+    @classmethod
+    def from_config(cls, *args, **kwargs):
         config = Config(*args, **kwargs)
-        return Transformer(config)
-        
-    @classmethod
-    def from_pretrained(cls, n_layer=1, d_model=512, modifier=None, device='cuda', **kwargs):
-        url = "tdooms/TinyStories"
-        name = f"{url}-{n_layer}-{d_model}"
-        if modifier is not None: name += f"-{modifier}"
-        
-        config = Config.from_pretrained(name)
-        return super(Transformer, Transformer).from_pretrained(name, config=config, device_map=device, **kwargs)
-    
-    def dataset(self, tokenized: bool = False, split: str | None = None):
-        location = f"{self.url}-tokenized-{self.config.n_vocab}" if tokenized else self.url
-        return load_dataset(location, split=split)
+        return Transformer(config, cls.get_tokenizer(config.tokenizer))
     
     def tokenize(self, dataset):
-        return self.tokenizer(dataset["text"], truncation=True, padding=True, max_length=256)
+        return self.tokenizer(dataset["text"], truncation=True, padding=True, max_length=self.config.n_ctx)
     
     @property
-    def sight(self):
-        return StoriesSight(self, tokenizer=self.tokenizer)
-    
-    @property
-    def vocab(self):
-        return Vocab(self.tokenizer)
+    def collator(self, **kwargs):
+        return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=False)
     
     @property
     def w_qkv(self):
@@ -247,12 +210,6 @@ class Transformer(PreTrainedModel):
         return rearrange(lr, "n_layer (n_proj d_hidden) d_model -> n_proj n_layer d_hidden d_model", n_proj=2)
     
     @property
-    def b(self):
-        w_l, w_r, w_p = self.w_l.detach(), self.w_r.detach(), self.w_p.detach()
-        b = einsum(w_l, w_r, w_p, "... hid in1, ... hid in2, ... out hid -> ... out in1 in2")
-        return 0.5 * (b + b.mT)
-    
-    @property
     def w_l(self):
         return self.w_lr[0]
     
@@ -262,7 +219,7 @@ class Transformer(PreTrainedModel):
     
     @property
     def w_p(self):
-        return torch.stack([self.transformer.h[i].mlp.o.weight for i in range(self.config.n_layer)], dim=0)
+        return torch.stack([self.transformer.h[i].mlp.p.weight for i in range(self.config.n_layer)], dim=0)
     
     @property
     def w_q(self):
@@ -297,36 +254,20 @@ class Transformer(PreTrainedModel):
     def ov(self):
         return self.w_o @ self.w_v
     
-    @property
-    def ube(self):
-        return UBE(self)
-    
-    @property
-    def name(self):
-        modifier = "" if self.config.modifier is None else f"-{self.config.modifier}"
-        return f"{self.url}-{self.config.n_layer}-{self.config.d_model}{modifier}"
-    
-    @property
-    def collator(self, **kwargs):
-        return DataCollatorForLanguageModeling(tokenizer=self.tokenizer, mlm=False)
-    
-    def fit(self, log=True, lr=1e-3, wd=0.2, batch_size=128, epochs=1, eval_steps=10_000, **kwargs):
-        dataset = self.dataset(tokenized=True)
-        train, validation = dataset["train"], dataset["validation"]
-        
+    def fit(self, train, project, lr=1e-3, wd=0.1, batch_size=128, callbacks=None, **kwargs):
         training_args = TrainingArguments(
-            # use_cpu=True,
             output_dir="_checkpoints",
             learning_rate=lr,
+            warmup_steps=50,
+            logging_steps=10,
+            adam_beta1=0.9,
+            adam_beta2=0.95,
+            optim="adamw_torch_fused",
             per_device_train_batch_size=batch_size,
-            per_device_eval_batch_size=batch_size,
-            num_train_epochs=epochs,
             weight_decay=wd,
-            do_eval=True,
-            evaluation_strategy="steps",
-            eval_steps=eval_steps,
-            report_to="wandb" if log else None,
-            remove_unused_columns=False,
+            do_eval=False,
+            report_to="wandb" if project else "none",
+            remove_unused_columns=True,
             **kwargs
         )
 
@@ -334,14 +275,14 @@ class Transformer(PreTrainedModel):
             model=self,
             args=training_args,
             train_dataset=train,
-            eval_dataset=validation,
             tokenizer=self.tokenizer,
             data_collator=self.collator,
+            callbacks=callbacks,
         )
         
-        if log: wandb.init(project="stories", config=self.config)
+        if project: wandb.init(project=project, config=self.config)
         trainer.train()
-        if log: wandb.finish()
+        if project: wandb.finish()
         
         return trainer
 
@@ -399,13 +340,13 @@ class Transformer(PreTrainedModel):
             self.transformer.h[0].attn.qkv.weight.numel(),
             self.transformer.h[0].attn.o.weight.numel(),
             self.transformer.h[0].mlp.w.weight.numel(),
-            self.transformer.h[0].mlp.o.weight.numel()
+            self.transformer.h[0].mlp.p.weight.numel()
         ]
         
         dims = [
             "",
-            f"{self.config.d_model} x {self.config.n_vocab}",
-            f"{self.config.n_vocab} x {self.config.d_model}",
+            f"{self.config.d_model} x {self.tokenizer.vocab_size}",
+            f"{self.tokenizer.vocab_size} x {self.config.d_model}",
             f"3 x {self.config.d_model} x {self.config.d_model}",
             f"{self.config.d_model} x {self.config.d_model}",
             f"2 x {self.config.d_hidden} x {self.config.d_model}",

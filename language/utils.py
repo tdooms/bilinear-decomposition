@@ -7,53 +7,9 @@ from typing import List, Tuple
 from torch import Tensor
 from jaxtyping import Int
 from collections import Counter
+from nnsight import LanguageModel
 
-class UBE:
-    def __init__(self, inner) -> None:
-        self.inner = inner
-    
-    def diagonal(self, residual: bool = False, layer: int = 0):
-        """The diagonal or direct token interactions of an MLP.
 
-        Args:
-            residual (bool, optional): Whether to include the residual. Defaults to False.
-            layer (int, optional):Which MLP layer to consider. Defaults to 0.
-
-        Returns:
-            Tensor: A matrix containing the diagonal
-        """
-        inner = self.inner
-        
-        diag = einsum(inner.b[layer], inner.w_e, inner.w_u, "res emb emb, emb inp, out res -> out inp")
-            
-        if residual:
-            diag += einsum(inner.w_e, inner.w_u, "res inp, out res -> out inp")
-        
-        return diag
-    
-    def interaction(self, token: int, residual: bool = False, layer:int = 0):
-        """Compute the interaction matrix of an MLP for a certain output token.
-
-        Args:
-            idx (int): Vocab token index
-            residual (bool, optional): Whether to include the residual. Defaults to False.
-            layer (int, optional): Which MLP layer to consider. Defaults to 0.
-
-        Returns:
-            Tensor: A matrix containing the token interactions
-        """
-        inner = self.inner
-        
-        inter = einsum(
-            inner.w_e, inner.w_e, inner.b[layer], inner.w_u[token],
-            "emb1 inp1, emb2 inp2, out emb1 emb2, out -> inp1 inp2"
-        )
-        
-        if residual:
-            inter += einsum(inner.w_e, inner.w_e, inner.w_u[token], "res inp1, res inp2, res -> inp1 inp2")
-        
-        return inter
-    
 class Vocab:
     def __init__(self, tokenizer: AutoTokenizer):
         self.vocab = bidict(tokenizer.vocab)
@@ -140,3 +96,31 @@ class Vocab:
     @property
     def inverse(self):
         return self.vocab.inverse
+
+
+class Sight(LanguageModel):
+    """A helper class to more cleanly interface with NNsight."""
+    def __init__(self, model, *args, **kwargs):
+        super().__init__(model, tokenizer=model.tokenizer, *args, **kwargs)
+    
+    def __getitem__(self, *args):
+        if len(args) == 1 and isinstance(args[0], tuple):
+             args = args[0]
+        
+        if len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], int):
+            point, layer = args
+        else:
+            raise ValueError("Invalid arguments, should be a tuple or two arguments.")
+        
+        point = point.replace("-", "_")
+        
+        return dict(
+            resid_pre=self._envoy.transformer.h[layer].input,
+            resid_mid=self._envoy.transformer.h[layer].n2.input,
+            resid_post=self._envoy.transformer.h[layer].output,
+            mlp_in=self._envoy.transformer.h[layer].n2.output,
+            mlp_out=self._envoy.transformer.h[layer].mlp.output,
+            attn_out=self._envoy.transformer.h[layer].attn.output,
+            pattern=self._envoy.transformer.h[layer].attn.softmax.output,
+            scores=self._envoy.transformer.h[layer].attn.softmax.input[0][0],
+        )[point]
