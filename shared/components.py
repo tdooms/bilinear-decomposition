@@ -3,8 +3,6 @@ from torch import Tensor
 import torch
 from typing import List, Tuple, Union
 from jaxtyping import Float
-import math
-from einops import rearrange
 
 class Bilinear(nn.Linear):
     """A bilinear layer with optional gate and noise"""
@@ -24,20 +22,12 @@ class Bilinear(nn.Linear):
     def w_r(self):
         return self.weight.chunk(2, dim=0)[1]
 
-# class Bilinear(nn.Linear):
-#     """A bilinear layer with optional gate and noise"""
-#     def __init__(self, d_in: int, d_out: int, bias=False, gate=None) -> None:
-#         super().__init__(d_in, d_out, bias=bias)
-    
-#     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
-#         return super().forward(x).pow(2)
-
 
 class Linear(nn.Linear):
     """A linear layer with optional gate and noise"""
-    def __init__(self, d_in: int, d_out: int, bias=False, gate=None, noise=None) -> None:
+    def __init__(self, d_in: int, d_out: int, bias=False, gate=None) -> None:
         super().__init__(d_in, d_out, bias=bias)
-        self.gate = {"relu":nn.ReLU(), "silu":nn.SiLU(), "gelu":nn.GELU(), None: nn.Identity()}[gate]
+        self.gate = {"relu": nn.ReLU(), "silu": nn.SiLU(), "gelu": nn.GELU(), None: nn.Identity()}[gate]
     
     def forward(self, x: Float[Tensor, "... d_in"]) -> Float[Tensor, "... d_out"]:
         return self.gate(super().forward(x))
