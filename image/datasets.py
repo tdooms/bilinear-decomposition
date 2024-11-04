@@ -3,7 +3,7 @@ from torchvision import datasets
 
 class MNIST(Dataset):
     """Wrapper class that loads MNIST onto the GPU for speed reasons."""
-    def __init__(self, train=True, download=False, device="cuda"):
+    def __init__(self, train=True, download=True, device="cuda"):
         dataset = datasets.MNIST(root='./data', train=train, download=download)
         self.x = dataset.data.float().to(device).unsqueeze(1) / 255.0
         self.y = dataset.targets.to(device)
@@ -16,7 +16,7 @@ class MNIST(Dataset):
 
 class FMNIST(Dataset):
     """Wrapper class that loads F-MNIST onto the GPU for speed reasons."""
-    def __init__(self, train=True, download=False, device="cuda"):
+    def __init__(self, train=True, download=True, device="cuda"):
         dataset = datasets.FashionMNIST(root='./data', train=train, download=download)
         self.x = dataset.data.float().to(device).unsqueeze(1) / 255.0
         self.y = dataset.targets.to(device)

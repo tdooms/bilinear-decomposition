@@ -21,7 +21,10 @@ from the weights alone. Our results demonstrate that bilinear layers serve as an
 interpretable drop-in replacement for current activation functions and that weight-based
 interpretability is viable for understanding deep-learning models.
 
-## Progress
+## Tutorials
 
-The current code only contains the infrastructure code to load models and analyze them without much documentation.
-We will add more documentation and add several examples soon™.
+The ``tutorial`` folder contains a series of notebooks, aimed at beginners or people who simply learn quicker by looking at code.
+These documents cover weight-based interpretability from the ground up and provide a step-by-step guide on how to think about bilinear layers.
+The document covers our results on image models and language models.
+
+The tutorials are currently in beta and may be on the short side, if you have any suggestions or critique, let me (@tdooms) know.

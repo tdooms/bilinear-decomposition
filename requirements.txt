@@ -9,3 +9,4 @@ torch
 accelerate
 bidict
 nnsight
+kornia

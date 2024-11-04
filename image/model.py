@@ -4,7 +4,6 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-
 from transformers import PretrainedConfig, PreTrainedModel
 from jaxtyping import Float
 from tqdm import tqdm
@@ -27,13 +26,12 @@ class Config(PretrainedConfig):
         wd: float = 0.5,
         epochs: int = 100,
         batch_size: int = 2048,
-        d_hidden: int = 512,
-        n_layer: int = 3,
+        d_hidden: int = 256,
+        n_layer: int = 1,
         d_input: int = 784,
         d_output: int = 10,
         bias: bool = False,
         residual: bool = False,
-        device: str = "cuda",
         seed: int = 42,
         **kwargs
     ):
@@ -41,6 +39,7 @@ class Config(PretrainedConfig):
         self.wd = wd
         self.epochs = epochs
         self.batch_size = batch_size
+        self.seed = seed
     
         self.d_hidden = d_hidden
         self.n_layer = n_layer
@@ -49,8 +48,7 @@ class Config(PretrainedConfig):
         self.bias = bias
         self.residual = residual
         
-        self.device = device
-        self.seed = seed
+        
         
         super().__init__(**kwargs)
 
@@ -118,6 +116,7 @@ class Model(PreTrainedModel):
     
     def fit(self, train, test, transform=None):
         torch.manual_seed(self.config.seed)
+        torch.set_grad_enabled(True)
         
         optimizer = AdamW(self.parameters(), lr=self.config.lr, weight_decay=self.config.wd)
         scheduler = CosineAnnealingLR(optimizer, T_max=self.config.epochs)
@@ -151,6 +150,7 @@ class Model(PreTrainedModel):
             history.append(metrics)
             pbar.set_description(', '.join(f"{k}: {v:.3f}" for k, v in metrics.items()))
         
+        torch.set_grad_enabled(False)
         return DataFrame.from_records(history, columns=['train/loss', 'train/acc', 'val/loss', 'val/acc'])
 
     def decompose(self):
@@ -169,7 +169,7 @@ class Model(PreTrainedModel):
         vals, vecs = torch.linalg.eigh(b)
         
         # Project the eigenvectors back to the input space
-        vecs = einsum(vecs, self.w_e, "cls emb batch, emb inp -> cls batch inp")
+        vecs = einsum(vecs, self.w_e, "cls emb comp, emb inp -> cls comp inp")
         
         # Return the eigenvalues and eigenvectors
         return vals, vecs
