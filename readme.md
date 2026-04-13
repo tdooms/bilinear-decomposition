@@ -21,6 +21,22 @@ from the weights alone. Our results demonstrate that bilinear layers serve as an
 interpretable drop-in replacement for current activation functions and that weight-based
 interpretability is viable for understanding deep-learning models.
 
+## Installation
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
+
+```bash
+uv sync
+```
+
+This creates a virtual environment and installs all dependencies.
+
+Run scripts and notebooks with, or just select the venv kernel in VSCode:
+
+```bash
+uv run python <script.py>
+```
+
 ## Tutorials
 
 The ``tutorial`` folder contains a series of notebooks, aimed at beginners or people who simply learn quicker by looking at code.

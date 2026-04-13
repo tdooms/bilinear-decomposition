@@ -1,0 +1,41 @@
+[project]
+name = "bilinear-decomposition"
+version = "0.1.0"
+description = "Bilinear MLPs enable weight-based mechanistic interpretability"
+readme = "readme.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch",
+    "torchvision",
+    "einops",
+    "transformers",
+    "jaxtyping",
+    "pandas",
+    "datasets",
+    "wandb",
+    "accelerate",
+    "bidict",
+    "nnsight",
+    "kornia",
+    "plotly",
+    "ipykernel",
+    "ruff",
+    "ipywidgets>=8.1.8",
+    "nbformat>=5.10.4",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }
+torchvision = { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" }

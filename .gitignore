@@ -4,4 +4,9 @@ sae/__pycache__
 image/__pycache__
 toy/__pycache__
 data/*
-.vscode/*
+.vscode/*src/bilinear_decomposition.egg-info/
+
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
