@@ -69,11 +69,11 @@ class Rotary(torch.nn.Module):
         self.cos_cached = None
         self.sin_cached = None
 
-    def forward(self, q, k, device="cuda"):
-        seq_len = q.size(-2)
+    def forward(self, q, k):
+        seq_len, device = q.size(-2), q.device
         
         # Using isinstance does not work, this is necessary for NNSight compatibility
-        if (seq_len != self.seq_len_cached) or type(self.cos_cached) != torch.Tensor:
+        if (seq_len != self.seq_len_cached) or type(self.cos_cached) != torch.Tensor or self.cos_cached.device != device:
             self.seq_len_cached = seq_len
             
             t = torch.arange(seq_len, device=device).type_as(self.inv_freq)
